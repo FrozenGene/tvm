@@ -36,6 +36,8 @@
 #include <vector>
 
 #include "graph_runtime.h"
+#include "../object_internal.h"
+#include "../file_util.h"
 
 namespace tvm {
 namespace runtime {
@@ -67,10 +69,11 @@ void GraphRuntime::Run() {
 void GraphRuntime::Init(const std::string& graph_json,
                         tvm::runtime::Module module,
                         const std::vector<TVMContext>& ctxs) {
+  graph_json_ = graph_json;
 #ifndef _LIBCPP_SGX_NO_IOSTREAMS
-  std::istringstream is(graph_json);
+  std::istringstream is(graph_json_);
 #else
-  std::string is = graph_json;
+  std::string is = graph_json_;
 #endif
   dmlc::JSONReader reader(&is);
   this->Load(&reader);
@@ -84,6 +87,11 @@ void GraphRuntime::Init(const std::string& graph_json,
     input_map_[name] = i;
   }
 }
+
+void GraphRuntime::SaveToBinary(dmlc::Stream* stream) {
+  stream->Write(graph_json_);
+}
+
 /*!
  * \brief Get the input index given the name of input.
  * \param name The name of the input.
@@ -469,6 +477,20 @@ PackedFunc GraphRuntime::GetFunction(
         dmlc::MemoryStringStream strm(const_cast<std::string*>(&param_blob));
         this->ShareParams(dynamic_cast<const GraphRuntime&>(*module.operator->()), &strm);
       });
+  } else if (name == "init") {
+    return PackedFunc([sptr_to_self, this](TVMArgs args, TVMRetValue* rv) {
+      std::vector<TVMContext> contexts;
+      TVMContext ctx;
+      for (int i = 0; i < args.num_args; i += 2) {
+        int dev_type = args[i];
+        ctx.device_type = static_cast<DLDeviceType>(dev_type);
+        ctx.device_id = args[i + 1];
+        contexts.push_back(ctx);
+      }
+      auto graph_json = this->GetGraphJson();
+      CHECK_EQ(this->imports().size(), 1);
+      this->Init(graph_json, this->imports()[0], contexts);
+    });
   } else {
     return PackedFunc();
   }
@@ -496,13 +518,22 @@ std::vector<TVMContext> GetAllContext(const TVMArgs& args) {
   return ret;
 }
 
+Module GraphRuntimeModuleLoadBinary(void* strm) {
+  dmlc::Stream* stream = static_cast<dmlc::Stream*>(strm);
+  std::string graph_json;
+  stream->Read(&graph_json);
+  auto exec = make_object<GraphRuntime>();
+  exec->SetGraphJson(graph_json);
+  return Module(exec);
+}
+
 // 4-argument version is currently reserved to keep support of calling
 // from tvm4j and javascript, since they don't have heterogeneous
 // execution support yet. For heterogenenous execution, at least 5 arguments will
 // be passed in. The third one is the number of devices.
 // Eventually, we will only probably pass TVMContext for all the languages.
 TVM_REGISTER_GLOBAL("tvm.graph_runtime.create")
-  .set_body([](TVMArgs args, TVMRetValue* rv) {
+.set_body([](TVMArgs args, TVMRetValue* rv) {
     CHECK_GE(args.num_args, 4)
         << "The expected number of arguments for graph_runtime.create is "
            "at least 4, but it has "
@@ -510,5 +541,21 @@ TVM_REGISTER_GLOBAL("tvm.graph_runtime.create")
     const auto& contexts = GetAllContext(args);
     *rv = GraphRuntimeCreate(args[0], args[1], contexts);
   });
+
+TVM_REGISTER_GLOBAL("tvm.graph_runtime.create_module")
+.set_body([](TVMArgs args, TVMRetValue* rv) {
+    CHECK_EQ(args.num_args, 2) << "The expected number of arguments for "
+                                  "graph_runtime.create_module is "
+                                  "2, but it has "
+                               << args.num_args;
+    auto exec = make_object<GraphRuntime>();
+    exec->SetGraphJson(args[0]);
+    exec->Import(args[1]);
+    *rv = Module(exec);
+  });
+
+TVM_REGISTER_GLOBAL("module.loadbinary_GraphRuntime")
+.set_body_typed(GraphRuntimeModuleLoadBinary);
+
 }  // namespace runtime
 }  // namespace tvm

@@ -79,8 +79,12 @@ class DSOModuleNode final : public ModuleNode {
         reinterpret_cast<const char*>(
             GetSymbol(runtime::symbol::tvm_dev_mblob));
     if (dev_mblob != nullptr) {
-      ImportModuleBlob(dev_mblob, &imports_);
+      root_module_ = ImportModuleBlob(dev_mblob, &imports_);
     }
+  }
+
+  runtime::Module GetRootModule() const {
+    return root_module_;
   }
 
  private:
@@ -120,13 +124,20 @@ class DSOModuleNode final : public ModuleNode {
     dlclose(lib_handle_);
   }
 #endif
+  runtime::Module root_module_;
 };
 
 TVM_REGISTER_GLOBAL("module.loadfile_so")
 .set_body([](TVMArgs args, TVMRetValue* rv) {
     auto n = make_object<DSOModuleNode>();
     n->Init(args[0]);
-    *rv = runtime::Module(n);
+    if (n->GetRootModule().defined()) {
+      auto root_module = n->GetRootModule();
+      root_module->Import(runtime::Module(n));
+      *rv = root_module;
+    } else {
+      *rv = runtime::Module(n);
+    }
   });
 }  // namespace runtime
 }  // namespace tvm

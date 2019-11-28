@@ -50,7 +50,7 @@ PackedFunc WrapPackedFunc(BackendPackedCFunc faddr, const ObjectPtr<Object>& mpt
  * \param mblob The module blob.
  * \param module_list The module list to append to
  */
-void ImportModuleBlob(const char* mblob, std::vector<Module>* module_list);
+runtime::Module ImportModuleBlob(const char* mblob, std::vector<Module>* module_list);
 
 /*!
  * \brief Utility to initialize conext function symbols during startup

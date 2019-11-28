@@ -145,7 +145,12 @@ class RPCSession(object):
         m : Module
             The remote module containing remote function.
         """
-        return base._LoadRemoteModule(self._sess, path)
+        module = base._LoadRemoteModule(self._sess, path)
+        type_key = self.get_function("module._GetTypeKey")(module)
+        if type_key == "GraphRuntime":
+            from tvm.contrib import graph_runtime
+            return graph_runtime.GraphModule(module)
+        return module
 
     def cpu(self, dev_id=0):
         """Construct CPU device."""

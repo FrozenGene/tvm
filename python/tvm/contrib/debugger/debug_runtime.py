@@ -71,7 +71,43 @@ def create(graph_json_str, libmod, ctx, dump_root=None):
             "config.cmake and rebuild TVM to enable debug mode"
         )
     func_obj = fcreate(graph_json_str, libmod, *device_type_id)
-    return GraphModuleDebug(func_obj, ctx, graph_json_str, dump_root)
+    return GraphModuleDebug(func_obj, graph_json_str, dump_root, ctx)
+
+def create_module(graph_json_str, libmod, dump_root=None):
+    """Create a runtime executor module given a graph and module.
+
+    Parameters
+    ----------
+    graph_json_str : str or graph class
+        The graph to be deployed in json format output by nnvm graph.
+        The graph can only contain one operator(tvm_op) that
+        points to the name of PackedFunc in the libmod.
+
+    libmod : tvm.Module
+        The module of the corresponding function.
+
+    dump_root : str
+        To select which folder the outputs should be kept.
+        None will make a temp folder in /tmp/tvmdbg<rand_string> and does the dumping
+    Returns
+    -------
+    graph_module : GraphModuleDebug
+        Debug Runtime graph module that can be used to execute the graph.
+    """
+    if not isinstance(graph_json_str, string_types):
+        try:
+            graph_json_str = graph_json_str._tvm_graph_json()
+        except AttributeError:
+            raise ValueError("Type %s is not supported" % type(graph_json_str))
+    try:
+        fcreate = get_global_func("tvm.graph_runtime_debug.create_module")
+    except ValueError:
+        raise ValueError(
+            "Please set '(USE_GRAPH_RUNTIME_DEBUG ON)' in "
+            "config.cmake and rebuild TVM to enable debug mode"
+        )
+    func_obj = fcreate(graph_json_str, libmod)
+    return GraphModuleDebug(func_obj, graph_json_str, dump_root)
 
 
 class GraphModuleDebug(graph_runtime.GraphModule):
@@ -87,24 +123,31 @@ class GraphModuleDebug(graph_runtime.GraphModule):
     module : Module
         The interal tvm module that holds the actual graph functions.
 
-    ctx : TVMContext
-        The context this module is under.
-
     graph_json_str : str or graph class
         Content of graph json file in string format
 
     dump_root : str
         To select which folder the outputs should be kept.
         None will make a temp folder in /tmp/tvmdbg<rand_string> and does the dumping
+
+    ctx : TVMContext
+        The context this module is under.
     """
 
-    def __init__(self, module, ctx, graph_json_str, dump_root):
+    def __init__(self, module, graph_json_str, dump_root, ctx=None):
         self._dump_root = dump_root
         self._dump_path = None
+        self._graph_json_str = graph_json_str
         self._get_output_by_layer = module["get_output_by_layer"]
         self._run_individual = module["run_individual"]
         graph_runtime.GraphModule.__init__(self, module)
-        self._create_debug_env(graph_json_str, ctx)
+        if ctx:
+            self._create_debug_env(graph_json_str, ctx)
+
+    def init(self, ctx):
+        ctx, num_rpc_ctx, device_type_id = graph_runtime.get_device_ctx(self.module, ctx)
+        self._init(*device_type_id)
+        self._create_debug_env(self._graph_json_str, ctx)
 
     def _format_context(self, ctx):
         return str(ctx[0]).upper().replace("(", ":").replace(")", "")

@@ -99,10 +99,15 @@ class GraphRuntime : public ModuleNode {
    * \param ctxs The context of the host and devices where graph nodes will be
    *  executed on.
    */
-
   void Init(const std::string& graph_json,
             tvm::runtime::Module module,
             const std::vector<TVMContext>& ctxs);
+
+  /*!
+   * \brief Save the module to binary stream.
+   * \param stream The binary stream to save to.
+   */
+  void SaveToBinary(dmlc::Stream* stream) final;
 
   /*!
    * \brief Get the input index given the name of input.
@@ -178,6 +183,14 @@ class GraphRuntime : public ModuleNode {
 
   std::string GetNodeName(uint32_t nid) const {
     return nodes_[nid].name;
+  }
+
+  void SetGraphJson(const std::string& graph_json) {
+    graph_json_ = graph_json;
+  }
+
+  std::string GetGraphJson() const {
+    return graph_json_;
   }
 
 
@@ -406,6 +419,8 @@ class GraphRuntime : public ModuleNode {
   std::vector<NodeEntry> outputs_;
   /*! \brief Additional graph attributes. */
   GraphAttr attrs_;
+  /*! \brief The execution graph. */
+  std::string graph_json_;
   /*! \brief The code module that contains both host and device code. */
   tvm::runtime::Module module_;
   /*! \brief Execution context of all devices including the host. */

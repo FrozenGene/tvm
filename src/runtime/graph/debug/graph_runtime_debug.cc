@@ -214,10 +214,22 @@ Module GraphRuntimeDebugCreate(const std::string& sym_json,
 TVM_REGISTER_GLOBAL("tvm.graph_runtime_debug.create")
 .set_body([](TVMArgs args, TVMRetValue* rv) {
     CHECK_GE(args.num_args, 4)
-        << "The expected number of arguments for graph_runtime.create is "
+        << "The expected number of arguments for graph_runtime_debug.create is "
            "at least 4, but it has "
         << args.num_args;
     *rv = GraphRuntimeDebugCreate(args[0], args[1], GetAllContext(args));
+  });
+
+TVM_REGISTER_GLOBAL("tvm.graph_runtime_debug.create_module")
+.set_body([](TVMArgs args, TVMRetValue* rv) {
+    CHECK_EQ(args.num_args, 2) << "The expected number of arguments for "
+                                  "graph_runtime_debug.create_module is "
+                                  "2, but it has "
+                               << args.num_args;
+    auto exec = make_object<GraphRuntimeDebug>();
+    exec->SetGraphJson(args[0]);
+    exec->Import(args[1]);
+    *rv = Module(exec);
   });
 }  // namespace runtime
 }  // namespace tvm

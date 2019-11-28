@@ -80,7 +80,12 @@ class ModuleBase(object):
         self.entry_name = "__tvm_main__"
 
     def __del__(self):
-        check_call(_LIB.TVMModFree(self.handle))
+        # Keep the same mechanism of previous
+        # GraphModule has its own del.
+        # Otherwise, we will get free() corrupted chunk error.
+        from tvm.contrib.graph_runtime import GraphModule
+        if not isinstance(self, GraphModule):
+            check_call(_LIB.TVMModFree(self.handle))
 
     @property
     def entry_func(self):

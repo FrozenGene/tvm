@@ -118,21 +118,28 @@ class Module(ModuleBase):
             self.save(file_name)
             return
 
-        if not (self.type_key == "llvm" or self.type_key == "c"):
-            raise ValueError("Module[%s]: Only llvm and c support export shared" % self.type_key)
+        if not (self.type_key == "llvm" or self.type_key == "c" or
+                self.type_key == "GraphRuntime"):
+            raise ValueError("Module[%s]: Only llvm, c and graph runtime support export shared" % self.type_key)
+
+        if self.type_key == "GraphRuntime":
+            assert len(self.imported_modules) == 1
+            module = self.imported_modules[0]
+        else:
+            module = self
         temp = _util.tempdir()
         if fcompile is not None and hasattr(fcompile, "object_format"):
             object_format = fcompile.object_format
         else:
-            if self.type_key == "llvm":
+            if module.type_key == "llvm":
                 object_format = "o"
             else:
-                assert self.type_key == "c"
+                assert module.type_key == "c"
                 object_format = "cc"
         path_obj = temp.relpath("lib." + object_format)
-        self.save(path_obj)
+        module.save(path_obj)
         files = [path_obj]
-        is_system_lib = self.type_key == "llvm" and self.get_function("__tvm_is_system_module")()
+        is_system_lib = module.type_key == "llvm" and module.get_function("__tvm_is_system_module")()
         if self.imported_modules:
             path_cc = temp.relpath("devc.cc")
             with open(path_cc, "w") as f:
@@ -269,7 +276,12 @@ def load(path, fmt=""):
     elif path.endswith(".obj"):
         fmt = "micro_dev"
     # Redirect to the load API
-    return _LoadFromFile(path, fmt)
+    module = _LoadFromFile(path, fmt)
+    assert isinstance(module, Module)
+    if module.type_key == "GraphRuntime":
+        from tvm.contrib import graph_runtime
+        return graph_runtime.GraphModule(module)
+    return module
 
 
 def enabled(target):

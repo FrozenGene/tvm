@@ -21,6 +21,8 @@ from .._ffi.base import string_types
 from .._ffi.function import get_global_func
 from .._ffi.runtime_ctypes import TVMContext
 from ..rpc import base as rpc_base
+from ..contrib import cc as _cc, tar as _tar, util as _util
+from tvm.module import Module
 
 def create(graph_json_str, libmod, ctx):
     """Create a runtime executor module given a graph and module.
@@ -56,6 +58,29 @@ def create(graph_json_str, libmod, ctx):
         fcreate = get_global_func("tvm.graph_runtime.create")
 
     return GraphModule(fcreate(graph_json_str, libmod, *device_type_id))
+
+def create_module(graph_json_str, libmod):
+    """Create a runtime executor module given a graph and module.
+    Parameters
+    ----------
+    graph_json_str : str or graph class
+        The graph to be deployed in json format output by nnvm graph.
+        The graph can only contain one operator(tvm_op) that
+        points to the name of PackedFunc in the libmod.
+    libmod : tvm.Module
+        The module of the corresponding function
+    Returns
+    -------
+    graph_module : GraphModule
+        Runtime graph module that can be used to execute the graph.
+    """
+    if not isinstance(graph_json_str, string_types):
+        try:
+            graph_json_str = graph_json_str._tvm_graph_json()
+        except AttributeError:
+            raise ValueError("Type %s is not supported" % type(graph_json_str))
+    fcreate = get_global_func("tvm.graph_runtime.create_module")
+    return GraphModule(fcreate(graph_json_str, libmod))
 
 def get_device_ctx(libmod, ctx):
     """Parse and validate all the device context(s).
@@ -102,7 +127,7 @@ def get_device_ctx(libmod, ctx):
     return ctx, num_rpc_ctx, device_type_id
 
 
-class GraphModule(object):
+class GraphModule(Module):
     """Wrapper runtime module.
 
     This is a thin wrapper of the underlying TVM module.
@@ -129,6 +154,12 @@ class GraphModule(object):
         self._get_num_outputs = module["get_num_outputs"]
         self._load_params = module["load_params"]
         self._share_params = module["share_params"]
+        self._init = module["init"]
+        super(GraphModule, self).__init__(self.module.handle)
+
+    def init(self, ctx):
+        ctx, num_rpc_ctx, device_type_id = get_device_ctx(self.module, ctx)
+        self._init(*device_type_id)
 
     def set_input(self, key=None, value=None, **params):
         """Set inputs to the module via kwargs
@@ -256,3 +287,4 @@ class GraphModule(object):
             The key to the module.
         """
         return self.module[key]
+

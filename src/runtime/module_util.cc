@@ -33,7 +33,7 @@
 namespace tvm {
 namespace runtime {
 
-void ImportModuleBlob(const char* mblob, std::vector<Module>* mlist) {
+runtime::Module ImportModuleBlob(const char* mblob, std::vector<Module>* mlist) {
 #ifndef _LIBCPP_SGX_CONFIG
   CHECK(mblob != nullptr);
   uint64_t nbytes = 0;
@@ -44,18 +44,45 @@ void ImportModuleBlob(const char* mblob, std::vector<Module>* mlist) {
   dmlc::MemoryFixedSizeStream fs(
       const_cast<char*>(mblob + sizeof(nbytes)), static_cast<size_t>(nbytes));
   dmlc::Stream* stream = &fs;
-  uint64_t size;
-  CHECK(stream->Read(&size));
-  for (uint64_t i = 0; i < size; ++i) {
+  uint64_t import_tree_size;
+  stream->Read(&import_tree_size);
+  if (import_tree_size) {
+    std::vector<uint64_t> order;
+    stream->Read(&order);
+    CHECK(order.size() > 0 && order[0] != 0);
     std::string tkey;
     CHECK(stream->Read(&tkey));
     std::string fkey = "module.loadbinary_" + tkey;
     const PackedFunc* f = Registry::Get(fkey);
-    CHECK(f != nullptr)
+    Module root_module = (*f)(static_cast<void*>(stream));
+    for (int i = 1; i < order.size(); i++) {
+      if (order[i] != 0) {
+        CHECK(stream->Read(&tkey));
+        fkey = "module.loadbinary_" + tkey;
+        const PackedFunc* packed_func = Registry::Get(fkey);
+        CHECK(packed_func != nullptr)
+          << "Loader of " << tkey << "("
+          << fkey << ") is not presented.";
+        Module m = (*packed_func)(static_cast<void*>(stream));
+        mlist->push_back(m);
+      }
+    }
+    return root_module;
+  } else {
+    uint64_t size;
+    CHECK(stream->Read(&size));
+    for (uint64_t i = 0; i < size; ++i) {
+      std::string tkey;
+      CHECK(stream->Read(&tkey));
+      std::string fkey = "module.loadbinary_" + tkey;
+      const PackedFunc* f = Registry::Get(fkey);
+      CHECK(f != nullptr)
         << "Loader of " << tkey << "("
         << fkey << ") is not presented.";
-    Module m = (*f)(static_cast<void*>(stream));
-    mlist->push_back(m);
+      Module m = (*f)(static_cast<void*>(stream));
+      mlist->push_back(m);
+    }
+    return Module();
   }
 #else
   LOG(FATAL) << "SGX does not support ImportModuleBlob";

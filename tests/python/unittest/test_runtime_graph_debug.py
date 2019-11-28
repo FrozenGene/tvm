@@ -52,13 +52,17 @@ def test_graph_simple():
              "attrs": attrs}
     graph = json.dumps(graph)
 
-    def check_verify():
+    def check_verify(standarize_runtime=False):
         if not tvm.module.enabled("llvm"):
             print("Skip because llvm is not enabled")
             return
         mlib = tvm.build(s, [A, B], "llvm", name="myadd")
         try:
-            mod = graph_runtime.create(graph, mlib, tvm.cpu(0))
+            if standarize_runtime:
+                mod = graph_runtime.create_module(graph, mlib)
+                mod.init(tvm.cpu(0))
+            else:
+                mod = graph_runtime.create(graph, mlib, tvm.cpu(0))
         except ValueError:
             return
 
@@ -104,7 +108,7 @@ def test_graph_simple():
         #verify dump root delete after cleanup
         assert(not os.path.exists(directory))
 
-    def check_remote():
+    def check_remote(standarize_runtime=False):
         if not tvm.module.enabled("llvm"):
             print("Skip because llvm is not enabled")
             return
@@ -114,22 +118,40 @@ def test_graph_simple():
         temp = util.tempdir()
         ctx = remote.cpu(0)
         path_dso = temp.relpath("dev_lib.so")
-        mlib.export_library(path_dso)
-        remote.upload(path_dso)
-        mlib = remote.load_module("dev_lib.so")
         try:
-            mod = graph_runtime.create(graph, mlib, remote.cpu(0))
+            if standarize_runtime:
+                mod = graph_runtime.create_module(graph, mlib)
+                mod.export_library(path_dso)
+            else:
+                mlib.export_library(path_dso)
+        except ValueError:
+            print("Skip because debug graph_runtime not enabled")
+            return
+        remote.upload(path_dso)
+        mlib = remote.load_module(path_dso)
+        try:
+            if standarize_runtime:
+                mlib.init(remote.cpu(0))
+            else:
+                mod = graph_runtime.create(graph, mlib, remote.cpu(0))
         except ValueError:
             print("Skip because debug graph_runtime not enabled")
             return
         a = np.random.uniform(size=(n,)).astype(A.dtype)
-        mod.run(x=tvm.nd.array(a, ctx))
-        out = tvm.nd.empty((n,), ctx=ctx)
-        out = mod.get_output(0, out)
+        if standarize_runtime:
+            mlib.run(x=tvm.nd.array(a, ctx))
+            out = tvm.nd.empty((n,), ctx=ctx)
+            out = mlib.get_output(0, out)
+        else:
+            mod.run(x=tvm.nd.array(a, ctx))
+            out = tvm.nd.empty((n,), ctx=ctx)
+            out = mod.get_output(0, out)
         np.testing.assert_equal(out.asnumpy(), a + 1)
 
     check_verify()
     check_remote()
+    check_verify(standarize_runtime=True)
+    check_remote(standarize_runtime=True)
 
 if __name__ == "__main__":
     test_graph_simple()
